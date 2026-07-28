@@ -220,7 +220,7 @@ export default function Home() {
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="min-h-screen flex flex-col bg-white" style={{ fontSize: "16px" }}>
       <Header phase={phase} onNewCase={handleNewCase} />
 
       <main className="flex-1 flex flex-col">
