@@ -1,7 +1,7 @@
 "use client"
 
-import { motion } from "framer-motion"
-import { FileCheck2, RotateCcw } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
+import { FileCheck2, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Phase } from "@/types"
 
@@ -10,81 +10,59 @@ interface HeaderProps {
   onNewCase: () => void
 }
 
+const PHASE_LABELS: Record<Phase, { label: string; color: string; dot: string }> = {
+  upload:     { label: "New case",      color: "text-slate-500 bg-slate-100",           dot: "bg-slate-400" },
+  processing: { label: "Analysing",     color: "text-indigo-600 bg-indigo-50",          dot: "bg-indigo-500 animate-pulse-dot" },
+  rejected:   { label: "Out of scope",  color: "text-amber-600 bg-amber-50",            dot: "bg-amber-500" },
+  report:     { label: "Report ready",  color: "text-emerald-700 bg-emerald-50",        dot: "bg-emerald-500" },
+}
+
 export function Header({ phase, onNewCase }: HeaderProps) {
-  const hasCase = phase !== "upload"
+  const pill = PHASE_LABELS[phase]
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-100 bg-white/80 backdrop-blur-md">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-        {/* Logo + wordmark */}
-        <motion.div
-          className="flex items-center gap-2.5"
-          initial={{ opacity: 0, x: -12 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg gradient-bg shadow-sm">
-            <FileCheck2 className="w-4 h-4 text-white" strokeWidth={2.2} />
-          </div>
-          <div className="leading-none">
-            <span className="font-semibold text-slate-900 text-sm tracking-tight">Zikra</span>
-            <span className="hidden sm:inline text-slate-400 text-xs ml-2">
-              Filing Readiness Copilot
-            </span>
-          </div>
-        </motion.div>
+    <header className="sticky top-0 z-50 w-full bg-white border-b border-slate-200">
+      <div className="flex items-center justify-between h-12 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
 
-        {/* Right side */}
-        <motion.div
-          className="flex items-center gap-3"
-          initial={{ opacity: 0, x: 12 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        >
-          {/* Phase pill */}
+        {/* Left — logo */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-7 h-7 rounded-md gradient-bg flex items-center justify-center shrink-0">
+            <FileCheck2 className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+          </div>
+          <span className="font-semibold text-slate-900 text-sm tracking-tight">Zikra</span>
+          <span className="hidden md:block text-slate-300 text-sm select-none">·</span>
+          <span className="hidden md:block text-slate-400 text-xs">Filing Readiness Copilot</span>
+        </div>
+
+        {/* Center — phase status */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={phase}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.2 }}
+            className={`hidden sm:inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${pill.color}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${pill.dot}`} />
+            {pill.label}
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Right — actions */}
+        <div className="flex items-center gap-2">
           {phase !== "upload" && (
-            <motion.span
-              key={phase}
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.25 }}
-              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                phase === "processing"
-                  ? "bg-indigo-50 text-indigo-600"
-                  : phase === "report"
-                  ? "bg-emerald-50 text-emerald-600"
-                  : "bg-amber-50 text-amber-600"
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  phase === "processing"
-                    ? "bg-indigo-500 animate-pulse-dot"
-                    : phase === "report"
-                    ? "bg-emerald-500"
-                    : "bg-amber-500"
-                }`}
-              />
-              {phase === "processing"
-                ? "Analysing"
-                : phase === "report"
-                ? "Report ready"
-                : "Out of scope"}
-            </motion.span>
-          )}
-
-          {hasCase && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="gap-1.5 text-slate-500 hover:text-slate-800 text-xs h-7"
               onClick={onNewCase}
+              className="h-7 text-xs gap-1.5 text-slate-600 border-slate-200"
             >
-              <RotateCcw className="w-3 h-3" />
+              <Plus className="w-3 h-3" />
               New case
             </Button>
           )}
-        </motion.div>
+        </div>
       </div>
     </header>
   )

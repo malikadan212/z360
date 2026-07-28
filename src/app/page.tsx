@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { AnimatePresence } from "framer-motion"
-import { useRouter, useSearchParams } from "next/navigation"
 
 import { Header } from "@/components/Header"
 import { UploadPhase } from "@/components/UploadPhase"
@@ -221,10 +220,10 @@ export default function Home() {
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen flex flex-col bg-[#fafafa]">
+    <div className="min-h-screen flex flex-col bg-white">
       <Header phase={phase} onNewCase={handleNewCase} />
 
-      <main className="flex-1">
+      <main className="flex-1 flex flex-col">
         <AnimatePresence mode="wait">
           {phase === "upload" && (
             <UploadPhase
