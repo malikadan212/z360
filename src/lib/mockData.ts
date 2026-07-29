@@ -50,19 +50,19 @@ export const MOCK_REPORT: ReadinessReport = {
   },
   missingItems: [
     {
-      document: "Pakistan Remittance Certificate (PRC)",
-      reason:   "Proves foreign remittance received through official banking channel",
-      reference: "SRO 586(I)/1991",
+      document: "Proceeds Realization Certificate (PRC)",
+      reason:   "Proves foreign exchange was received through official banking channels — issued by your bank on conversion to PKR",
+      reference: "SBP Foreign Exchange Regulations",
     },
     {
       document: "Freelance Platform Export Certificate",
-      reason:   "Documents that services were delivered as IT exports on the platform",
-      reference: "FBR Circular 2021",
+      reason:   "Documents that services were delivered as IT exports on the freelance platform",
+      reference: "FBR Circular on IT Export Income",
     },
     {
       document: "PSEB Registration Certificate",
-      reason:   "Pakistan Software Export Board registration required for IT exporters",
-      reference: "PSEB Act",
+      reason:   "Required to qualify for the preferential 0.25% tax rate under Section 65F",
+      reference: "Income Tax Ordinance 2001, Section 65F",
     },
   ],
   issues: [

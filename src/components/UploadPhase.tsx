@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { IncomeRow, UploadedFile } from "@/types"
 
-const CURRENCIES = ["USD", "GBP", "EUR", "AUD", "CAD", "PKR"]
+const CURRENCIES = ["USD", "GBP", "EUR", "AUD", "CAD"]
 const fmt = (b: number) => b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`
 const CSV_SAMPLE = `invoice_number,client,amount,currency,date\nINV-001,Acme Corp,2500.00,USD,2024-03-15\nINV-002,Beta Ltd,1800.00,GBP,2024-04-02`
 
@@ -128,20 +128,20 @@ export function UploadPhase({
           transition={{ delay: 0.08, duration: 0.35 }}
           className="flex flex-col gap-7 flex-1">
           <div>
-            <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-widest mb-2">For IT export freelancers</p>
+            <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-widest mb-2">For Pakistani freelancers</p>
             <h1 className="text-xl xl:text-2xl font-bold leading-tight text-white">
-              Is your paperwork ready for FBR?
+              Are your invoices ready for FBR?
             </h1>
             <p className="text-sm text-slate-400 mt-2.5 leading-relaxed">
-              Upload your invoices and we'll check them against FBR rules — telling you exactly what's missing before you file.
+              Upload your foreign income invoices and get a readiness score — with a list of every missing document you need before filing with FBR.
             </p>
           </div>
 
           <div className="space-y-2.5">
             {[
-              { icon: Zap,      title: "Instant analysis",   desc: "6-step agent workflow" },
-              { icon: FileText, title: "Rules, not guesses",  desc: "All checks from FBR references" },
-              { icon: Shield,   title: "Advisory only",       desc: "Not a tax calculator" },
+              { icon: Zap,      title: "Know what's missing",  desc: "Before FBR finds out first" },
+              { icon: FileText, title: "Rules, not guesses",    desc: "All checks from FBR references" },
+              { icon: Shield,   title: "Advisory only",         desc: "Not a tax calculator or legal advice" },
             ].map(({ icon: Icon, title, desc }) => (
               <div key={title} className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-md bg-white/8 border border-white/10 flex items-center justify-center shrink-0">
@@ -157,10 +157,10 @@ export function UploadPhase({
 
           <div className="rounded-lg bg-white/5 border border-white/8 px-4 py-3 text-xs text-slate-400 leading-relaxed">
             <span className="text-indigo-300 font-semibold">Scope: </span>
-            IT export services — software dev, consulting, SaaS, web/mobile dev.
+            IT export services only — software dev, consulting, SaaS, web/mobile development.
           </div>
 
-          <p className="text-xs text-slate-600 mt-auto">Files processed server-side. Advisory use only.</p>
+          <p className="text-xs text-slate-600 mt-auto">TaxReady.pk — not a tax calculator. Advisory use only.</p>
         </motion.div>
       </aside>
 

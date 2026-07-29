@@ -282,9 +282,9 @@ This screen is the architecture explanation in visual form — a reviewer should
 ### `tax_rules` seed (IT Export Services)
 | required_document | reason | reference |
 |---|---|---|
-| Pakistan Remittance Certificate (PRC) | Proves foreign remittance received through banking channel | SRO 586(I)/1991 |
-| Freelance Platform Export Certificate | Documents export services on platform | FBR Circular 2021 |
-| PSEB Registration Certificate | Pakistan Software Export Board registration for IT exporters | PSEB Act |
+| Proceeds Realization Certificate (PRC) | Proves foreign exchange received through official banking channel — issued by bank on conversion to PKR | SBP Foreign Exchange Regulations |
+| Freelance Platform Export Certificate | Documents export services on platform | FBR Circular on IT Export Income |
+| PSEB Registration Certificate | Required for preferential 0.25% rate under Section 65F | Income Tax Ordinance 2001, Section 65F |
 | NTN Registration Certificate | Mandatory for filing — NTN required | ITO 2001 S.114 |
 
 ### `notice_types` seed

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Zikra — Filing Readiness Copilot",
-  description: "Helps Pakistani IT freelancers assess tax filing readiness with FBR. Not a tax calculator.",
+  title: "TaxReady.pk — FBR Filing Readiness for Pakistani Freelancers",
+  description: "Pakistani IT freelancers: find out if your invoices and documents are ready for FBR filing. Get a readiness score, missing docs list, and notice decoder — in seconds.",
 };
 
 export default function RootLayout({
