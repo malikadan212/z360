@@ -2,16 +2,17 @@
 
 import * as React from "react"
 import { AnimatePresence } from "framer-motion"
+import { createClient } from "@/lib/client"
 
-import { Header } from "@/components/Header"
-import { UploadPhase } from "@/components/UploadPhase"
+import { Header }          from "@/components/Header"
+import { UploadPhase }     from "@/components/UploadPhase"
 import { ProcessingPhase } from "@/components/ProcessingPhase"
-import { RejectedPhase } from "@/components/RejectedPhase"
-import { ReportPhase } from "@/components/ReportPhase"
+import { RejectedPhase }   from "@/components/RejectedPhase"
+import { FailedPhase }     from "@/components/FailedPhase"
+import { ReportPhase }     from "@/components/ReportPhase"
 import { OnboardingModal } from "@/components/OnboardingModal"
 
 import { parseCSV } from "@/lib/csvParser"
-import { MOCK_REPORT } from "@/lib/mockData"
 
 import type {
   Phase, IncomeRow, UploadedFile,
@@ -39,7 +40,7 @@ export default function Home() {
   const [chatMessages, setChatMessages]   = React.useState<ChatMessage[]>([])
   const [isChatLoading, setIsChatLoading] = React.useState(false)
 
-  // URL sync
+  // ── URL sync ──────────────────────────────────────────────────────────────
   React.useEffect(() => {
     if (typeof window === "undefined") return
     const url = new URL(window.location.href)
@@ -48,6 +49,96 @@ export default function Home() {
     window.history.replaceState({}, "", url.toString())
   }, [caseId])
 
+  // ── Realtime subscription ─────────────────────────────────────────────────
+  // Subscribes to agent_events + cases for a given caseId.
+  // Replaced the demo simulation — this is the real data source.
+  React.useEffect(() => {
+    if (!caseId || phase !== "processing") return
+
+    const supabase = createClient()
+
+    // Subscribe to agent_events for live step ticks
+    const eventsChannel = supabase
+      .channel(`agent_events:${caseId}`)
+      .on(
+        "postgres_changes",
+        {
+          event:  "*",
+          schema: "public",
+          table:  "agent_events",
+          filter: `case_id=eq.${caseId}`,
+        },
+        (payload) => {
+          const updated = payload.new as AgentEvent
+          setAgentEvents(prev => {
+            const exists = prev.some(e => e.id === updated.id)
+            if (exists) return prev.map(e => e.id === updated.id ? updated : e)
+            return [...prev, updated]
+          })
+        }
+      )
+      .subscribe()
+
+    // Subscribe to cases.status to know when to flip phase
+    const casesChannel = supabase
+      .channel(`cases:${caseId}`)
+      .on(
+        "postgres_changes",
+        {
+          event:  "UPDATE",
+          schema: "public",
+          table:  "cases",
+          filter: `id=eq.${caseId}`,
+        },
+        async (payload) => {
+          const status = (payload.new as { status: string }).status
+
+          if (status === "completed") {
+            // Fetch the full report
+            const { data } = await supabase
+              .from("readiness_reports")
+              .select("*")
+              .eq("case_id", caseId)
+              .single()
+
+            if (data) {
+              setReport({
+                score:           data.score,
+                breakdown:       data.score_breakdown,
+                missingItems:    data.missing_items,
+                issues:          data.issues,
+                recommendations: data.recommendations,
+                generatedAt:     data.created_at,
+              })
+              setPhase("report")
+            }
+          } else if (status === "rejected") {
+            setPhase("rejected")
+          } else if (status === "failed") {
+            setPhase("failed")
+          }
+        }
+      )
+      .subscribe()
+
+    // Also do an initial fetch of any events already in DB
+    // (handles the case where events were written before subscription started)
+    supabase
+      .from("agent_events")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) setAgentEvents(data as AgentEvent[])
+      })
+
+    return () => {
+      supabase.removeChannel(eventsChannel)
+      supabase.removeChannel(casesChannel)
+    }
+  }, [caseId, phase])
+
+  // ── Row handlers ──────────────────────────────────────────────────────────
   const handleRowChange = (id: string, field: keyof IncomeRow, value: string) =>
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
   const handleRowAdd    = () => setRows(prev => [...prev, emptyRow()])
@@ -67,53 +158,53 @@ export default function Home() {
     if (parsed.length > 0) setRows(parsed)
   }
 
+  // ── Submit — real API calls ────────────────────────────────────────────────
   const handleSubmit = async () => {
     setIsSubmitting(true)
-    const newCaseId = nanoid()
-    setCaseId(newCaseId)
-    setPhase("processing")
-    setAgentEvents([])
-    setIsSubmitting(false)
-    simulateAgentRun(newCaseId)
-  }
 
-  const simulateAgentRun = (runCaseId: string) => {
-    const steps = ["parse_document", "validate_case", "rule_lookup", "check_evidence", "notice_analyzer", "readiness_evaluator"]
-    const metadata: Record<string, Record<string, unknown>> = {
-      parse_document:      { invoiceCount: rows.length },
-      validate_case:       { incomeType: "IT Export Services — validated" },
-      rule_lookup:         { ruleCount: 4 },
-      check_evidence:      {},
-      notice_analyzer:     noticeFiles.length > 0 ? { noticeType: "Audit Notice detected" } : {},
-      readiness_evaluator: { score: 68 },
+    try {
+      // Build FormData — /api/cases expects multipart
+      const fd = new FormData()
+      fd.append("rows", JSON.stringify(rows.map(r => ({
+        invoiceNumber: r.invoiceNumber,
+        client:        r.client,
+        amount:        r.amount,
+        currency:      r.currency,
+        date:          r.date,
+      }))))
+
+      invoiceFiles.forEach(f => fd.append("invoices", f.file))
+      noticeFiles.forEach(f  => fd.append("notice",   f.file))
+
+      // Step 1 — fast sync: create case, upload files, seed events
+      const casesRes = await fetch("/api/cases", { method: "POST", body: fd })
+      if (!casesRes.ok) {
+        const err = await casesRes.json()
+        console.error("POST /api/cases failed", err)
+        setIsSubmitting(false)
+        return
+      }
+
+      const { caseId: newCaseId } = await casesRes.json() as { caseId: string }
+      setCaseId(newCaseId)
+      setPhase("processing")
+      setAgentEvents([])
+      setIsSubmitting(false)
+
+      // Step 2 — fire graph run without awaiting (browser doesn't wait for graph)
+      fetch("/api/agent/run", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ caseId: newCaseId }),
+      }).catch(err => console.error("POST /api/agent/run fire error", err))
+
+    } catch (err) {
+      console.error("handleSubmit error", err)
+      setIsSubmitting(false)
     }
-
-    setAgentEvents(steps.map((step, i) => ({
-      id: `${runCaseId}-${i}`, case_id: runCaseId, step,
-      status: "pending" as const, started_at: null, completed_at: null, metadata: {},
-    })))
-
-    let delay = 600
-    steps.forEach((step, i) => {
-      const runDelay = delay
-      setTimeout(() => {
-        setAgentEvents(prev => prev.map(e => e.step === step
-          ? { ...e, status: "running", started_at: new Date().toISOString() } : e))
-      }, runDelay)
-
-      const doneDelay = delay + 900 + Math.random() * 400
-      setTimeout(() => {
-        setAgentEvents(prev => prev.map(e => e.step === step
-          ? { ...e, status: "completed", completed_at: new Date().toISOString(), metadata: metadata[step] ?? {} } : e))
-        if (i === steps.length - 1) {
-          setTimeout(() => { setReport(MOCK_REPORT); setPhase("report") }, 600)
-        }
-      }, doneDelay)
-
-      delay = doneDelay + 200
-    })
   }
 
+  // ── Reset ─────────────────────────────────────────────────────────────────
   const handleNewCase = () => {
     setPhase("upload"); setRows([emptyRow()])
     setInvoiceFiles([]); setNoticeFiles([])
@@ -122,22 +213,48 @@ export default function Home() {
     setIsSubmitting(false)
   }
 
+  // ── Chat — real API call, scoped to existing report ───────────────────────
   const handleChatSend = async (text: string) => {
-    setChatMessages(prev => [...prev, { id: nanoid(), role: "user", content: text, timestamp: new Date().toISOString() }])
-    setIsChatLoading(true)
-    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800))
-    const replies: Record<string, string> = {
-      "why is my score not 100%": "Your score is 68/100 because three required documents are missing: the PRC, your platform export certificate, and PSEB registration. Together these account for 22 of the 40 points in the required-documents criterion.",
-      "what is a prc": "A Pakistan Remittance Certificate (PRC) is issued by your bank and certifies that foreign currency was received through official banking channels. Under SRO 586(I)/1991, it's required to prove your income qualifies as export income.",
-      "how urgent is my notice": "Your Audit Notice has 18 days remaining. Medium severity — you have time to prepare, but should not delay. Gather income evidence and consult a tax practitioner this week.",
+    const userMsg: ChatMessage = {
+      id: nanoid(), role: "user", content: text,
+      timestamp: new Date().toISOString(),
     }
-    const key = Object.keys(replies).find(k => text.toLowerCase().includes(k))
-    const content = key ? replies[key]
-      : `Your score is ${report?.score ?? "—"}/100 with ${report?.missingItems.length ?? 0} missing documents. Ask me about any specific item.`
-    setChatMessages(prev => [...prev, { id: nanoid(), role: "assistant", content, timestamp: new Date().toISOString() }])
-    setIsChatLoading(false)
+    setChatMessages(prev => [...prev, userMsg])
+    setIsChatLoading(true)
+
+    try {
+      const res = await fetch("/api/chat", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          caseId,
+          message: text,
+          history: chatMessages.map(m => ({ role: m.role, content: m.content })),
+        }),
+      })
+
+      const { reply, error } = await res.json() as { reply?: string; error?: string }
+
+      setChatMessages(prev => [...prev, {
+        id:        nanoid(),
+        role:      "assistant",
+        content:   reply ?? error ?? "Sorry, something went wrong.",
+        timestamp: new Date().toISOString(),
+      }])
+    } catch (err) {
+      console.error("chat error", err)
+      setChatMessages(prev => [...prev, {
+        id:        nanoid(),
+        role:      "assistant",
+        content:   "Sorry, there was an error. Please try again.",
+        timestamp: new Date().toISOString(),
+      }])
+    } finally {
+      setIsChatLoading(false)
+    }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <Header phase={phase} onNewCase={handleNewCase} />
@@ -159,14 +276,14 @@ export default function Home() {
               invoiceFiles={invoiceFiles} noticeFiles={noticeFiles} />
           )}
           {phase === "rejected" && <RejectedPhase key="rejected" onNewCase={handleNewCase} />}
-          {phase === "report" && report && (
+          {phase === "failed"   && <FailedPhase   key="failed"   onNewCase={handleNewCase} />}
+          {phase === "report"   && report && (
             <ReportPhase key="report" report={report} chatMessages={chatMessages}
               onChatSend={handleChatSend} isChatLoading={isChatLoading} />
           )}
         </AnimatePresence>
       </main>
 
-      {/* Onboarding modal — shown on first load */}
       <AnimatePresence>
         {showOnboarding && (
           <OnboardingModal onDismiss={() => setShowOnboarding(false)} />

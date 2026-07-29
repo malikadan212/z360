@@ -1,5 +1,5 @@
 // ─── Phase State Machine ─────────────────────────────────────────────────────
-export type Phase = 'upload' | 'processing' | 'rejected' | 'report'
+export type Phase = 'upload' | 'processing' | 'rejected' | 'report' | 'failed'
 
 // ─── Income / Upload ─────────────────────────────────────────────────────────
 export interface IncomeRow {

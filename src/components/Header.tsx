@@ -14,6 +14,7 @@ const PHASE_LABELS: Record<Phase, { label: string; color: string; dot: string }>
   upload:     { label: "New case",     color: "text-slate-500 bg-slate-100",    dot: "bg-slate-400" },
   processing: { label: "Analysing",    color: "text-indigo-600 bg-indigo-50",   dot: "bg-indigo-500 animate-pulse-dot" },
   rejected:   { label: "Out of scope", color: "text-amber-600 bg-amber-50",     dot: "bg-amber-500" },
+  failed:     { label: "Failed",       color: "text-red-600 bg-red-50",         dot: "bg-red-500" },
   report:     { label: "Report ready", color: "text-emerald-700 bg-emerald-50", dot: "bg-emerald-500" },
 }
 

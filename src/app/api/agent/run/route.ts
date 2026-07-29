@@ -79,7 +79,7 @@ async function runGraph(caseId: string) {
     })
   } catch (err) {
     console.error('Graph invoke error', caseId, err)
-    // Mark case as failed so the frontend doesn't hang
-    await admin.from('cases').update({ status: 'rejected' }).eq('id', caseId)
+    // Mark case as failed so the frontend stops spinning and shows the failure state
+    await admin.from('cases').update({ status: 'failed' }).eq('id', caseId)
   }
 }
