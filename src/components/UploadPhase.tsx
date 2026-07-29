@@ -106,12 +106,13 @@ interface UploadPhaseProps {
   onInvoiceAdd: (f: File[]) => void; onInvoiceRemove: (id: string) => void
   onNoticeAdd: (f: File[]) => void; onNoticeRemove: (id: string) => void
   onCSVUpload: (f: File) => void; onSubmit: () => void; isSubmitting: boolean
+  csvError: string | null
 }
 
 export function UploadPhase({
   rows, invoiceFiles, noticeFiles, onRowChange, onRowAdd, onRowRemove,
   onInvoiceAdd, onInvoiceRemove, onNoticeAdd, onNoticeRemove,
-  onCSVUpload, onSubmit, isSubmitting,
+  onCSVUpload, onSubmit, isSubmitting, csvError,
 }: UploadPhaseProps) {
   const csvRef = React.useRef<HTMLInputElement>(null)
   const hasValid = rows.some(r => r.invoiceNumber.trim() && r.client.trim() && r.amount.trim() && r.date.trim())
@@ -173,10 +174,13 @@ export function UploadPhase({
           {/* Income section */}
           <section className="space-y-2.5">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Income data <span className="text-red-400">*</span></h2>
-                <p className="text-xs text-slate-500">Enter manually or import from CSV</p>
-              </div>
+               <div>
+                 <h2 className="text-base font-semibold text-slate-900">Income data <span className="text-red-400">*</span></h2>
+                 <p className="text-xs text-slate-500">Enter manually or import from CSV</p>
+               </div>
+               {csvError && (
+                 <p className="text-xs text-red-400 mt-1">{csvError}</p>
+               )}
               <div className="flex items-center gap-2.5">
                 <input ref={csvRef} type="file" accept=".csv" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) { onCSVUpload(f); e.target.value = "" } }} />

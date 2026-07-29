@@ -12,7 +12,7 @@ import { FailedPhase }     from "@/components/FailedPhase"
 import { ReportPhase }     from "@/components/ReportPhase"
 import { OnboardingModal } from "@/components/OnboardingModal"
 
-import { parseCSV } from "@/lib/csvParser"
+import { parseCSV, VALID_CURRENCIES } from "@/lib/csvParser"
 
 import type {
   Phase, IncomeRow, UploadedFile,
@@ -32,6 +32,7 @@ export default function Home() {
   const [invoiceFiles, setInvoiceFiles] = React.useState<UploadedFile[]>([])
   const [noticeFiles, setNoticeFiles]   = React.useState<UploadedFile[]>([])
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [csvError, setCsvError]               = React.useState<string | null>(null)
 
   const [agentEvents, setAgentEvents] = React.useState<AgentEvent[]>([])
   const [caseId, setCaseId]           = React.useState<string | null>(null)
@@ -147,7 +148,13 @@ export default function Home() {
   }
 
   const handleCSVUpload = async (file: File) => {
+    setCsvError(null)
     const parsed = await parseCSV(file)
+    const invalid = parsed.filter(r => r.currency && !VALID_CURRENCIES.includes(r.currency))
+    if (invalid.length > 0) {
+      setCsvError(`Unrecognized currency in row(s): ${invalid.map(r => r.invoiceNumber || "?").join(", ")}. Valid currencies: ${VALID_CURRENCIES.join(", ")}.`)
+      return
+    }
     if (parsed.length > 0) setRows(parsed)
   }
 
@@ -256,14 +263,15 @@ export default function Home() {
       <main className="flex-1 flex flex-col">
         <AnimatePresence mode="wait">
           {phase === "upload" && (
-            <UploadPhase key="upload" rows={rows} invoiceFiles={invoiceFiles} noticeFiles={noticeFiles}
-              onRowChange={handleRowChange} onRowAdd={handleRowAdd} onRowRemove={handleRowRemove}
-              onInvoiceAdd={f => addFiles(setInvoiceFiles, "invoice", true, f)}
-              onInvoiceRemove={id => setInvoiceFiles(prev => prev.filter(f => f.id !== id))}
-              onNoticeAdd={f => addFiles(setNoticeFiles, "notice", false, f)}
-              onNoticeRemove={id => setNoticeFiles(prev => prev.filter(f => f.id !== id))}
-              onCSVUpload={handleCSVUpload} onSubmit={handleSubmit} isSubmitting={isSubmitting}
-            />
+<UploadPhase key="upload" rows={rows} invoiceFiles={invoiceFiles} noticeFiles={noticeFiles}
+               onRowChange={handleRowChange} onRowAdd={handleRowAdd} onRowRemove={handleRowRemove}
+               onInvoiceAdd={f => addFiles(setInvoiceFiles, "invoice", true, f)}
+               onInvoiceRemove={id => setInvoiceFiles(prev => prev.filter(f => f.id !== id))}
+               onNoticeAdd={f => addFiles(setNoticeFiles, "notice", false, f)}
+               onNoticeRemove={id => setNoticeFiles(prev => prev.filter(f => f.id !== id))}
+               onCSVUpload={handleCSVUpload} onSubmit={handleSubmit} isSubmitting={isSubmitting}
+               csvError={csvError}
+             />
           )}
           {phase === "processing" && (
             <ProcessingPhase key="processing" events={agentEvents} rows={rows}

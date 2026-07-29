@@ -1,5 +1,7 @@
 import type { IncomeRow } from "@/types"
 
+export const VALID_CURRENCIES = ["USD", "GBP", "EUR", "AUD", "CAD"]
+
 const nanoid = () => Math.random().toString(36).slice(2, 9)
 
 /**
