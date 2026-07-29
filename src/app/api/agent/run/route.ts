@@ -1,21 +1,27 @@
 /**
  * POST /api/agent/run
  *
- * Async leg — runs the full LangGraph graph for a given case.
- * Called immediately after /api/cases returns, without the client waiting.
- * Response is returned instantly (202 Accepted); all progress is communicated
- * via Supabase Realtime updates to agent_events and cases.
+ * Runs the full LangGraph graph for a given case.
+ * The browser fires this without awaiting the response — it gets a 202
+ * immediately because we use the NextResponse trick below.
  *
- * export const maxDuration = 60 gives up to 60s on Vercel Pro.
- * For Hobby (10s limit), use Vercel's waitUntil pattern instead.
+ * IMPORTANT: On Vercel, a function is kept alive only as long as it's actively
+ * executing. Returning early and running a Promise in the background does NOT
+ * keep it alive. We use waitUntil() from @vercel/functions to correctly
+ * register the background work with the runtime so the function stays alive
+ * until the graph finishes, regardless of when the HTTP response was sent.
+ *
+ * export const maxDuration = 120 — Vercel Pro supports up to 800s;
+ * set to 120 for safety. The graph typically runs in 15-40s.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { buildGraph } from '@/lib/agent/graph'
 
-export const runtime    = 'nodejs'
-export const maxDuration = 60   // seconds — set higher on Vercel Pro if needed
+export const runtime     = 'nodejs'
+export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
   const { caseId } = await req.json() as { caseId: string }
@@ -24,10 +30,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'caseId is required' }, { status: 400 })
   }
 
-  // Return 202 immediately — the graph runs in the background.
-  // On Vercel, the function stays alive until maxDuration.
-  const runPromise = runGraph(caseId)
-  runPromise.catch(err => console.error('Graph run unhandled error', caseId, err))
+  // Register the graph run with the Vercel runtime before returning the response.
+  // waitUntil keeps the function alive until the Promise resolves, even after
+  // the HTTP response has been sent to the client.
+  waitUntil(runGraph(caseId))
 
   return NextResponse.json({ status: 'running', caseId }, { status: 202 })
 }
@@ -35,7 +41,6 @@ export async function POST(req: NextRequest) {
 async function runGraph(caseId: string) {
   const admin = createAdminClient()
 
-  // Load the case data seeded by /api/cases
   const [
     { data: entries },
     { data: files },
@@ -52,11 +57,8 @@ async function runGraph(caseId: string) {
     date:          e.date           ?? '',
   }))
 
-  const invoicePdfPaths = (files ?? [])
-    .filter(f => f.kind === 'invoice_pdf')
-    .map(f => f.storage_path)
-
-  const noticeFile = (files ?? []).find(f => f.kind === 'notice')
+  const invoicePdfPaths   = (files ?? []).filter(f => f.kind === 'invoice_pdf').map(f => f.storage_path)
+  const noticeFile        = (files ?? []).find(f => f.kind === 'notice')
   const noticePdfPath     = noticeFile?.storage_path ?? null
   const uploadedFileNames = (files ?? []).map(f => f.original_name)
 
@@ -69,17 +71,16 @@ async function runGraph(caseId: string) {
       invoicePdfPaths,
       noticePdfPath,
       uploadedFileNames,
-      parsedInvoices:    [],
-      incomeType:        null,
-      caseValidated:     false,
-      rules:             [],
-      noticeResult:      null,
-      finalReport:       null,
-      error:             null,
+      parsedInvoices: [],
+      incomeType:     null,
+      caseValidated:  false,
+      rules:          [],
+      noticeResult:   null,
+      finalReport:    null,
+      error:          null,
     })
   } catch (err) {
     console.error('Graph invoke error', caseId, err)
-    // Mark case as failed so the frontend stops spinning and shows the failure state
     await admin.from('cases').update({ status: 'failed' }).eq('id', caseId)
   }
 }

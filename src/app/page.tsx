@@ -50,24 +50,26 @@ export default function Home() {
   }, [caseId])
 
   // ── Realtime subscription ─────────────────────────────────────────────────
-  // Subscribes to agent_events + cases for a given caseId.
-  // Replaced the demo simulation — this is the real data source.
+  // Ref holds active channels so handleNewCase can tear them down instantly,
+  // even if the user resets mid-run before the effect cleanup fires.
+  const channelsRef = React.useRef<ReturnType<ReturnType<typeof createClient>["channel"]>[]>([])
+
+  const teardownSubscriptions = React.useCallback(() => {
+    const supabase = createClient()
+    channelsRef.current.forEach(ch => supabase.removeChannel(ch))
+    channelsRef.current = []
+  }, [])
+
   React.useEffect(() => {
     if (!caseId || phase !== "processing") return
 
     const supabase = createClient()
 
-    // Subscribe to agent_events for live step ticks
     const eventsChannel = supabase
       .channel(`agent_events:${caseId}`)
       .on(
         "postgres_changes",
-        {
-          event:  "*",
-          schema: "public",
-          table:  "agent_events",
-          filter: `case_id=eq.${caseId}`,
-        },
+        { event: "*", schema: "public", table: "agent_events", filter: `case_id=eq.${caseId}` },
         (payload) => {
           const updated = payload.new as AgentEvent
           setAgentEvents(prev => {
@@ -79,22 +81,15 @@ export default function Home() {
       )
       .subscribe()
 
-    // Subscribe to cases.status to know when to flip phase
     const casesChannel = supabase
       .channel(`cases:${caseId}`)
       .on(
         "postgres_changes",
-        {
-          event:  "UPDATE",
-          schema: "public",
-          table:  "cases",
-          filter: `id=eq.${caseId}`,
-        },
+        { event: "UPDATE", schema: "public", table: "cases", filter: `id=eq.${caseId}` },
         async (payload) => {
           const status = (payload.new as { status: string }).status
 
           if (status === "completed") {
-            // Fetch the full report
             const { data } = await supabase
               .from("readiness_reports")
               .select("*")
@@ -121,22 +116,20 @@ export default function Home() {
       )
       .subscribe()
 
-    // Also do an initial fetch of any events already in DB
-    // (handles the case where events were written before subscription started)
+    channelsRef.current = [eventsChannel, casesChannel]
+
+    // Initial fetch — covers events written before the subscription connected
     supabase
       .from("agent_events")
       .select("*")
       .eq("case_id", caseId)
       .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        if (data && data.length > 0) setAgentEvents(data as AgentEvent[])
-      })
+      .then(({ data }) => { if (data && data.length > 0) setAgentEvents(data as AgentEvent[]) })
 
     return () => {
-      supabase.removeChannel(eventsChannel)
-      supabase.removeChannel(casesChannel)
+      teardownSubscriptions()
     }
-  }, [caseId, phase])
+  }, [caseId, phase, teardownSubscriptions])
 
   // ── Row handlers ──────────────────────────────────────────────────────────
   const handleRowChange = (id: string, field: keyof IncomeRow, value: string) =>
@@ -206,6 +199,7 @@ export default function Home() {
 
   // ── Reset ─────────────────────────────────────────────────────────────────
   const handleNewCase = () => {
+    teardownSubscriptions()   // kill any live subscription immediately
     setPhase("upload"); setRows([emptyRow()])
     setInvoiceFiles([]); setNoticeFiles([])
     setAgentEvents([]); setCaseId(null)

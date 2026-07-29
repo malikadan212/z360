@@ -48,6 +48,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'At least one income row is required' }, { status: 400 })
     }
 
+    // Validate currencies — must be foreign-source only (matches DB constraint)
+    const VALID_CURRENCIES = new Set(['USD', 'GBP', 'EUR', 'AUD', 'CAD'])
+    const invalidRows = rows.filter(r => r.currency && !VALID_CURRENCIES.has(r.currency))
+    if (invalidRows.length > 0) {
+      const bad = [...new Set(invalidRows.map(r => r.currency))].join(', ')
+      return NextResponse.json({
+        error: `Invalid currency: ${bad}. This tool only supports foreign-source income (USD, GBP, EUR, AUD, CAD). PKR income does not qualify as export income for FBR filing purposes.`,
+      }, { status: 400 })
+    }
+
     const admin = createAdminClient()
 
     // ── 1. Create case ─────────────────────────────────────────────────────
