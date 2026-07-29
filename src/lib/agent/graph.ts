@@ -6,7 +6,7 @@
  *   validate_case       → deterministic code — DB lookup, no LLM
  *   rule_lookup         → deterministic code — DB read, no LLM
  *   check_evidence      → deterministic code — compare sets, no LLM
- *   notice_analyzer     → LLM (Claude reads notice) — conditional
+ *   notice_analyzer     → LLM (Gemini reads notice) — conditional
  *   readiness_evaluator → deterministic scoring + deterministic recommendations
  *
  * Two conditional edges:
@@ -198,7 +198,7 @@ async function nodeCheckEvidence(state: GraphStateType): Promise<Partial<GraphSt
 }
 
 // ─── Node 5: notice_analyzer ─────────────────────────────────────────────────
-// Only called when a notice file is present. Uses Claude vision.
+// Only called when a notice file is present. Uses Gemini vision.
 
 async function nodeNoticeAnalyzer(state: GraphStateType): Promise<Partial<GraphStateType>> {
   const { caseId, noticePdfPath } = state

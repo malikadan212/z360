@@ -2,19 +2,20 @@
  * POST /api/chat
  *
  * Answers questions about an existing readiness report.
- * Does NOT re-run the LangGraph graph — single Claude completion
+ * Does NOT re-run the LangGraph graph — single Gemini completion
  * with the report + rules as context.
  *
  * Body: { caseId: string, message: string, history: { role, content }[] }
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { createAdminClient } from '@/lib/supabase-admin'
+import { withRetry } from '@/lib/agent/retry'
 
 export const runtime = 'nodejs'
 
-const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!)
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
 
     const admin = createAdminClient()
 
-    // Fetch the report and the relevant rules — this is all the context Claude needs
+    // Fetch the report and the relevant rules — this is all the context Gemini needs
     const [
       { data: report },
       { data: rules },
@@ -85,19 +86,20 @@ CONSTRAINTS — you must follow these:
     // Build message history (cap at last 10 turns to keep tokens reasonable)
     const recentHistory = history.slice(-10)
 
-    const response = await claude.messages.create({
-      model:      'claude-haiku-4-5',  // fast + cheap for chat
-      max_tokens: 512,
-      system:     systemPrompt,
-      messages: [
-        ...recentHistory.map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content: message },
-      ],
+    const model = genai.getGenerativeModel({
+      model:          'gemini-2.5-flash',
+      systemInstruction: systemPrompt,
     })
 
-    const replyText = response.content[0].type === 'text'
-      ? response.content[0].text
-      : 'Sorry, I could not generate a response.'
+    const chat = model.startChat({
+      history: recentHistory.map(m => ({
+        role:  m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }],
+      })),
+    })
+
+    const result    = await withRetry(() => chat.sendMessage(message))
+    const replyText = result.response.text() || 'Sorry, I could not generate a response.'
 
     // Persist the assistant reply
     await admin.from('chat_messages').insert({

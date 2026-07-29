@@ -2,18 +2,20 @@
  * The four agent tools.
  *
  * LLM is used ONLY in:
- *   parse_document   — field extraction from PDF/image via Claude vision
+ *   parse_document   — field extraction from PDF/image via Gemini vision
  *   notice_analyzer  — reading notice text to extract type + deadline
  *
  * Everything else (rule_lookup, readiness_evaluator) is deterministic code
  * reading from seeded Supabase tables or running the scoring rubric.
  */
 
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { calculateScore, type ScoringInput } from './scoring'
+import { withRetry } from './retry'
 
-const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const genai  = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!)
+const MODEL  = 'gemini-2.5-flash'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +55,7 @@ export interface ReadinessResult {
 
 // ─── Tool 1: parse_document ───────────────────────────────────────────────────
 // Primary path: manual/CSV rows are already structured — return as-is with high confidence.
-// Secondary path: PDF/image files — Claude vision extracts fields (best-effort).
+// Secondary path: PDF/image files — Gemini vision extracts fields (best-effort).
 
 export async function parseDocument(params: {
   manualRows: Array<{
@@ -78,7 +80,7 @@ export async function parseDocument(params: {
     })
   }
 
-  // PDF paths — Claude vision, best-effort
+  // PDF paths — Gemini vision, best-effort
   if (params.pdfStoragePaths.length > 0) {
     const admin = createAdminClient()
 
@@ -91,32 +93,29 @@ export async function parseDocument(params: {
 
         if (dlErr || !fileData) {
           console.error('PDF download error', storagePath, dlErr)
+          // Push placeholder so this file surfaces as unconfirmed rather than silently vanishing
+          results.push({
+            invoiceNumber:        null,
+            client:               null,
+            amount:               null,
+            currency:             null,
+            date:                 null,
+            extractionConfidence: 'unconfirmed',
+            source:               'pdf',
+          })
           continue
         }
 
         const buffer     = Buffer.from(await fileData.arrayBuffer())
         const base64Data = buffer.toString('base64')
-        const mediaType = storagePath.endsWith('.pdf')
-          ? ('application/pdf' as const)
-          : ('image/jpeg' as const)
+        const mimeType   = storagePath.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'
 
-        const response = await claude.messages.create({
-          model: 'claude-opus-4-5',
-          max_tokens: 512,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type:       'document' as const,
-                source:     {
-                  type:       'base64'  as const,
-                  media_type: mediaType as 'application/pdf',
-                  data:       base64Data,
-                },
-              },
-              {
-                type: 'text' as const,
-                text: `Extract invoice fields from this document. Return ONLY valid JSON with these exact keys:
+        const model    = genai.getGenerativeModel({ model: MODEL })
+        const response = await withRetry(() => model.generateContent([
+          {
+            inlineData: { data: base64Data, mimeType },
+          },
+          `Extract invoice fields from this document. Return ONLY valid JSON with these exact keys:
 {
   "invoiceNumber": string or null,
   "client": string or null,
@@ -127,28 +126,70 @@ export async function parseDocument(params: {
 }
 If you cannot confidently read a field, set it to null and set confidence to "low".
 Do not include any explanation — only the JSON object.`,
-              },
-            ],
-          }],
-        })
+        ]))
 
-        const text = response.content[0].type === 'text' ? response.content[0].text : ''
+        const text = response.response.text()
         const jsonMatch = text.match(/\{[\s\S]*\}/)
 
         if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0])
+          try {
+            const parsed = JSON.parse(jsonMatch[0])
+
+            // Validate currency against allowed set — Gemini may return "Rs", "PKR", etc.
+            // from messy invoices. Nullify and mark low-confidence rather than letting
+            // an invalid value hit the DB check constraint mid-run.
+            const VALID_CURRENCIES = new Set(['USD', 'GBP', 'EUR', 'AUD', 'CAD'])
+            const rawCurrency   = parsed.currency ?? null
+            const safeCurrency  = rawCurrency && VALID_CURRENCIES.has(rawCurrency) ? rawCurrency : null
+            const confidence    = (parsed.confidence === 'high' && safeCurrency !== null)
+              ? 'high' as const
+              : 'low'  as const
+
+            results.push({
+              invoiceNumber:        parsed.invoiceNumber ?? null,
+              client:               parsed.client        ?? null,
+              amount:               parsed.amount        ?? null,
+              currency:             safeCurrency,
+              date:                 parsed.date          ?? null,
+              extractionConfidence: confidence,
+              source:               'pdf',
+            })
+          } catch {
+            // JSON.parse failed — push placeholder so the file doesn't silently vanish
+            results.push({
+              invoiceNumber:        null,
+              client:               null,
+              amount:               null,
+              currency:             null,
+              date:                 null,
+              extractionConfidence: 'unconfirmed',
+              source:               'pdf',
+            })
+          }
+        } else {
+          // No JSON in response — push placeholder so file is surfaced, not silently dropped
           results.push({
-            invoiceNumber:        parsed.invoiceNumber ?? null,
-            client:               parsed.client        ?? null,
-            amount:               parsed.amount        ?? null,
-            currency:             parsed.currency      ?? null,
-            date:                 parsed.date          ?? null,
-            extractionConfidence: parsed.confidence === 'high' ? 'high' : 'low',
+            invoiceNumber:        null,
+            client:               null,
+            amount:               null,
+            currency:             null,
+            date:                 null,
+            extractionConfidence: 'unconfirmed',
             source:               'pdf',
           })
         }
       } catch (err) {
         console.error('PDF extraction error', storagePath, err)
+        // Push placeholder so this file is counted and surfaced, not silently dropped
+        results.push({
+          invoiceNumber:        null,
+          client:               null,
+          amount:               null,
+          currency:             null,
+          date:                 null,
+          extractionConfidence: 'unconfirmed',
+          source:               'pdf',
+        })
       }
     }
   }
@@ -181,7 +222,7 @@ export async function ruleLookup(incomeType: string): Promise<RuleResult[]> {
 
 // ─── Tool 3: notice_analyzer ──────────────────────────────────────────────────
 // Only called when a notice file is present.
-// Claude reads the notice text → matched against seeded notice_types table.
+// Gemini reads the notice text → matched against seeded notice_types table.
 
 export async function noticeAnalyzer(params: {
   noticeStoragePath: string
@@ -200,38 +241,28 @@ export async function noticeAnalyzer(params: {
 
   const buffer     = Buffer.from(await fileData.arrayBuffer())
   const base64Data = buffer.toString('base64')
+  const mimeType   = params.noticeStoragePath.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'
 
-  // Ask Claude to classify the notice type
-  const response = await claude.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 256,
-    messages: [{
-      role: 'user',
-      content: [
-        {
-          type:   'document' as const,
-          source: { type: 'base64' as const, media_type: 'application/pdf', data: base64Data },
-        },
-        {
-          type: 'text' as const,
-          text: `This is an FBR (Federal Board of Revenue) notice from Pakistan.
-Identify the notice type. It will be one of:
-- "Show-Cause Notice"
-- "Audit Notice"
-- "Tax Demand Notice"
-- "Unknown"
+  const model    = genai.getGenerativeModel({ model: MODEL })
+  const response = await withRetry(() => model.generateContent([
+    {
+      inlineData: { data: base64Data, mimeType },
+    },
+    `This is an FBR (Federal Board of Revenue) notice from Pakistan.
+ Identify the notice type. It will be one of:
+ - "Show-Cause Notice"
+ - "Audit Notice"
+ - "Tax Demand Notice"
+ - "Unknown"
+ 
+ Return ONLY valid JSON:
+ {
+   "noticeType": string,
+   "confidence": "high" or "low"
+ }`,
+  ]))
 
-Return ONLY valid JSON:
-{
-  "noticeType": string,
-  "confidence": "high" or "low"
-}`,
-        },
-      ],
-    }],
-  })
-
-  const text      = response.content[0].type === 'text' ? response.content[0].text : ''
+  const text      = response.response.text()
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) return null
 
@@ -279,7 +310,7 @@ Return ONLY valid JSON:
 
 // ─── Tool 4: readiness_evaluator ─────────────────────────────────────────────
 // Fully deterministic — calls calculateScore() from scoring.ts.
-// No LLM. Then asks Claude only for the natural-language explanation paragraph.
+// No LLM. The readiness score and recommendations are computed deterministically.
 
 export async function readinessEvaluator(params: {
   parsedInvoices:       ParsedInvoice[]
